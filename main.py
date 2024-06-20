@@ -1,9 +1,11 @@
 import asyncio
 import aiohttp
+import aiofiles
 import os
 import sys
-from typing import List, Tuple
+from typing import List
 from pydantic import BaseModel
+from pprint import pprint
 
 """
 The time frame is not enough to do everything perfectly.
@@ -26,47 +28,79 @@ I have the number of tasks to gather depend on that parameter.
 
 
 class Query(BaseModel):
-    pass
+    """
+    https://api.github.com/search/issues?q=factory in:file language:java repo:openjdk/jdk
+    https://api.github.com/search/issues?q=cache in:file repo:scala/scala
+    SEARCH_KEYWORD_1 SEARCH_KEYWORD_N QUALIFIER_1 QUALIFIER_N
+    """
+    full_query: str
+
+
+class Result(BaseModel):
+    total_count: int
+    items: List
 
 
 class HttpClient:
-
-    def __init__(self, session):
+    """
+    For unauthenticated requests, the rate limit allows you to make up to 10 requests per minute.
+    """
+    def __init__(self, session: aiohttp.ClientSession):
         self.session = session
 
-    def get(self):
-        pass
+    async def get(self, url: str):
+        return await self.session.get(url)
+
+    async def close_session(self):
+        await self.session.close()
 
 
 class Invoker:
 
-    def __init__(self, queries_path: str, http_client):
+    def __init__(self, queries_path: str, http_client: HttpClient):
         self.queries_path = queries_path
-        self.queries: List[Query] = self._load_queries()
         self.http_client = http_client
+        self.total_count = 0
+        self.items = []
 
-    def _load_queries(self) -> List[Query]:
-        return []
+    async def _load_queries(self) -> List[Query]:
+        queries = []
+        async with aiofiles.open(self.queries_path) as fh:
+            async for line in fh:
+                queries.append(Query(full_query=line.strip()))
 
-    async def invoke(self, queries: List[Query]) -> Tuple[int, List]:
-        pass
+        return queries
+
+    async def invoke(self, queries: List[Query]):
+        for q in queries:
+            try:
+                response = await self.http_client.get(q.full_query)
+                response.raise_for_status()
+            except aiohttp.ClientResponseError as e:
+                print(f"query {q.full_query} failed with {e}")
+                continue
+            j = await response.json()
+            result = Result(**j)
+            self.total_count += result.total_count
+            self.items.extend(result.items)
 
     async def run(self):
-        total_count = 0
-        items = []
+        queries: List[Query] = await self._load_queries()
+        tasks = [asyncio.create_task(self.invoke([q])) for q in queries]
+        await asyncio.gather(*tasks)
+        self.display()
 
-        # generate the tasks
-        # run gather
-
-    @staticmethod
-    def display(total_count: int, items: []):
-        print(total_count, items)
+    def display(self):
+        pprint(self.total_count)
+        pprint(self.items)
 
 
 async def main():
     queries_path = sys.argv[1]
-    invoker = Invoker(queries_path, HttpClient(aiohttp.ClientSession()))
+    http_client = HttpClient(aiohttp.ClientSession())
+    invoker = Invoker(queries_path, http_client)
     await invoker.run()
+    await http_client.close_session()
 
 
 if __name__ == '__main__':
@@ -78,4 +112,6 @@ if __name__ == '__main__':
         print("Usage: <main.py> <queries file>")
         sys.exit(1)
 
+    if os.name == 'nt':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(main())
