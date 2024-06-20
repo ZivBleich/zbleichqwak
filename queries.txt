@@ -1,0 +1,5 @@
+https://api.github.com/search/issues?q=class in:file language:java repo:scala/scala
+https://api.github.com/search/issues?q=addClass in:file language:js repo:jquery/jquery
+https://api.github.com/search/issues?q=factory in:file language:java repo:openjdk/jdk
+https://api.github.com/search/issues?q=cache in:file repo:scala/scala
+https://api.github.com/search/issues?q=while in:file repo:openjdk/jdk
